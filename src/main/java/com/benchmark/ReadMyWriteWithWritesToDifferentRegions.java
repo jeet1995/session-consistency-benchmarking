@@ -16,6 +16,7 @@ import com.azure.cosmos.models.CosmosClientTelemetryConfig;
 import com.azure.cosmos.models.CosmosItemRequestOptions;
 import com.azure.cosmos.models.PartitionKey;
 import com.azure.cosmos.models.ThroughputProperties;
+import com.beust.ah.A;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.json.JsonReadFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -34,6 +35,7 @@ import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.fail;
 
@@ -67,10 +69,48 @@ public class ReadMyWriteWithWritesToDifferentRegions extends Workload {
         int satelliteRegionWriterThreadCount = Math.min(cfg.getSatelliteRegionWriterThreadCount(), 20);
         AtomicBoolean shouldStop = new AtomicBoolean(false);
 
+        AtomicInteger totalWriteCountFromPrimaryWriter = new AtomicInteger(0);
+        AtomicInteger totalWriteCountFromSecondaryWriter = new AtomicInteger(0);
+        AtomicInteger totalReadCountFromPrimaryReader = new AtomicInteger(0);
+        AtomicInteger totalSuccessfulReadCountFromPrimaryReader = new AtomicInteger(0);
+        AtomicInteger totalSuccessfulWriteAttemptsFromPrimaryWriter = new AtomicInteger(0);
+        AtomicInteger totalSuccessfulWriteAttemptsFromSecondaryWriter = new AtomicInteger(0);
+
+        AtomicInteger thresholdExceededPrimaryWritesCount = new AtomicInteger(0);
+        AtomicInteger readSessionNotAvailablePrimaryWritesCount = new AtomicInteger(0);
+        AtomicInteger isFailurePrimaryWritesCount = new AtomicInteger(0);
+        AtomicInteger thresholdExceededSecondaryWritesCount = new AtomicInteger(0);
+        AtomicInteger readSessionNotAvailableSecondaryWritesCount = new AtomicInteger(0);
+        AtomicInteger isFailureSecondaryWritesCount = new AtomicInteger(0);
+        AtomicInteger thresholdExceededPrimaryReadsCount = new AtomicInteger(0);
+        AtomicInteger readSessionNotAvailablePrimaryReadsCount = new AtomicInteger(0);
+        AtomicInteger isFailurePrimaryReadsCount = new AtomicInteger(0);
+
         initializeServiceResources(cfg, loopCount, runId);
 
-        CosmosAsyncClient clientTargetedToFirstPreferredRegion = createClient(cfg, loopCount, runId, "onWriteOrReadToFirstPreferredRegion");
-        CosmosAsyncClient clientTargetedToOtherPreferredRegions = createClient(cfg, loopCount, runId, "onWriteToOtherPreferredRegion");
+        CosmosAsyncClient clientTargetedToFirstPreferredRegion = createClient(
+                cfg,
+                loopCount,
+                runId,
+                "onWriteOrReadToFirstPreferredRegion",
+                readSessionNotAvailablePrimaryWritesCount,
+                thresholdExceededPrimaryWritesCount,
+                isFailurePrimaryWritesCount,
+                readSessionNotAvailablePrimaryReadsCount,
+                thresholdExceededPrimaryReadsCount,
+                isFailurePrimaryReadsCount);
+
+        CosmosAsyncClient clientTargetedToOtherPreferredRegions = createClient(
+                cfg,
+                loopCount,
+                runId,
+                "onWriteToOtherPreferredRegion",
+                readSessionNotAvailableSecondaryWritesCount,
+                thresholdExceededSecondaryWritesCount,
+                isFailureSecondaryWritesCount,
+                null,
+                null,
+                null);
 
         executorForWritesAgainstFirstPreferredRegion
                 = new ScheduledThreadPoolExecutor(1, new CosmosDaemonThreadFactory("WriteAgainstFirstPreferredRegion"));
@@ -91,14 +131,14 @@ public class ReadMyWriteWithWritesToDifferentRegions extends Workload {
 
         scheduledFutureForWriteAgainstFirstPreferredRegion
                 = executorForWritesAgainstFirstPreferredRegion.schedule(
-                () -> onTryWriteToFirstPreferredRegion(clientTargetedToFirstPreferredRegion, cfg, shouldStop),
+                () -> onTryWriteToFirstPreferredRegion(clientTargetedToFirstPreferredRegion, cfg, shouldStop, totalWriteCountFromPrimaryWriter, totalSuccessfulWriteAttemptsFromPrimaryWriter),
                 1000,
                 TimeUnit.MILLISECONDS
         );
 
         scheduledFutureForReadAgainstFirstPreferredRegion
                 = executorForReadsAgainstFirstPreferredRegion.schedule(
-                () -> onTryReadFromFirstPreferredRegion(clientTargetedToFirstPreferredRegion, cfg, shouldStop),
+                () -> onTryReadFromFirstPreferredRegion(clientTargetedToFirstPreferredRegion, cfg, shouldStop, totalReadCountFromPrimaryReader, totalSuccessfulReadCountFromPrimaryReader),
                 1000,
                 TimeUnit.MILLISECONDS
         );
@@ -109,7 +149,7 @@ public class ReadMyWriteWithWritesToDifferentRegions extends Workload {
 
             scheduledFuturesForWriteAgainstOtherPreferredRegions[i]
                     = executorForWritesAgainstOtherPreferredRegions.schedule(
-                    () -> onWriteToOtherPreferredRegions(clientTargetedToOtherPreferredRegions, cfg, finalI, shouldStop),
+                    () -> onWriteToOtherPreferredRegions(clientTargetedToOtherPreferredRegions, cfg, finalI, shouldStop, totalWriteCountFromSecondaryWriter, totalSuccessfulWriteAttemptsFromSecondaryWriter),
                     1000,
                     TimeUnit.MILLISECONDS
             );
@@ -148,10 +188,36 @@ public class ReadMyWriteWithWritesToDifferentRegions extends Workload {
         executorForWritesAgainstOtherPreferredRegions.shutdown();
 
         printConfiguration(cfg);
-        printStatistics(globalCache);
+        printStatistics(
+                globalCache,
+                totalSuccessfulWriteAttemptsFromPrimaryWriter,
+                totalSuccessfulWriteAttemptsFromSecondaryWriter,
+                totalSuccessfulReadCountFromPrimaryReader,
+                totalWriteCountFromPrimaryWriter,
+                totalWriteCountFromSecondaryWriter,
+                totalReadCountFromPrimaryReader,
+                readSessionNotAvailablePrimaryWritesCount,
+                readSessionNotAvailableSecondaryWritesCount,
+                readSessionNotAvailablePrimaryReadsCount,
+                thresholdExceededPrimaryWritesCount,
+                thresholdExceededSecondaryWritesCount,
+                thresholdExceededPrimaryReadsCount,
+                isFailurePrimaryWritesCount,
+                isFailureSecondaryWritesCount,
+                isFailurePrimaryReadsCount);
     }
 
-    private static CosmosAsyncClient createClient(Configuration cfg, int loopCount, String runId, String clientId) {
+    private static CosmosAsyncClient createClient(
+            Configuration cfg,
+            int loopCount,
+            String runId,
+            String clientId,
+            AtomicInteger readSessionNotAvailableCountForWrites,
+            AtomicInteger thresholdExceededCountForWrites,
+            AtomicInteger failureCountForWrites,
+            AtomicInteger readSessionNotAvailableCountForReads,
+            AtomicInteger thresholdExceededCountForReads,
+            AtomicInteger failureCountForReads) {
         CosmosClientBuilder builder = new CosmosClientBuilder();
 
         builder.sessionRetryOptions(
@@ -189,6 +255,37 @@ public class ReadMyWriteWithWritesToDifferentRegions extends Workload {
                     || diagnosticsContext.getContactedRegionNames().size() > 1
                     || hasReadSessionNotAvailable) {
 
+                if (diagnosticsContext.getOperationType().equals("Create")) {
+
+                    if (diagnosticsContext.isFailure() && failureCountForWrites != null) {
+                        failureCountForWrites.incrementAndGet();
+                    }
+
+
+                    if (diagnosticsContext.isThresholdViolated() && thresholdExceededCountForWrites != null) {
+                        thresholdExceededCountForWrites.incrementAndGet();
+                    }
+
+
+                    if (hasReadSessionNotAvailable && readSessionNotAvailableCountForWrites != null) {
+                        readSessionNotAvailableCountForWrites.incrementAndGet();
+                    }
+                } else if (diagnosticsContext.getOperationType().equals("Read")) {
+                    if (diagnosticsContext.isFailure() && failureCountForReads != null) {
+                        failureCountForReads.incrementAndGet();
+                    }
+
+
+                    if (diagnosticsContext.isThresholdViolated() && thresholdExceededCountForReads != null) {
+                        thresholdExceededCountForReads.incrementAndGet();
+                    }
+
+
+                    if (hasReadSessionNotAvailable && readSessionNotAvailableCountForReads != null) {
+                        readSessionNotAvailableCountForReads.incrementAndGet();
+                    }
+                }
+
                 logger.info(
                         "{} IsFailure: {}, IsThresholdViolated: {}, ContactedRegions: {}, hasReadSessionNotAvailable: {}  CTX: {}",
                         clientId,
@@ -221,7 +318,7 @@ public class ReadMyWriteWithWritesToDifferentRegions extends Workload {
         String databaseName = cfg.getDatabaseName();
         String containerName = cfg.getContainerName();
 
-        client = createClient(cfg, loopCount, runId, "initializeServiceResources");
+        client = createClient(cfg, loopCount, runId, "initializeServiceResources", null, null, null, null, null, null);
 
         client
                 .createDatabaseIfNotExists(databaseName)
@@ -251,7 +348,13 @@ public class ReadMyWriteWithWritesToDifferentRegions extends Workload {
         }
     }
 
-    private static void onTryWriteToFirstPreferredRegion(CosmosAsyncClient clientForFirstPreferredRegion, Configuration cfg, AtomicBoolean shouldStopLoop) {
+    private static void onTryWriteToFirstPreferredRegion(
+            CosmosAsyncClient clientForFirstPreferredRegion,
+            Configuration cfg,
+            AtomicBoolean shouldStopLoop,
+            AtomicInteger totalWriteAttempts,
+            AtomicInteger totalSuccessfulWriteAttempts) {
+
         logger.info("WRITE to first preferred region started...");
 
         List<String> excludedRegions = Arrays.asList("");
@@ -259,17 +362,24 @@ public class ReadMyWriteWithWritesToDifferentRegions extends Workload {
         CosmosAsyncContainer container = clientForFirstPreferredRegion.getDatabase(cfg.getDatabaseName()).getContainer(cfg.getContainerName());
 
         while (!shouldStopLoop.get()) {
-            writeLoop(container, shouldStopLoop, excludedRegions, 1000, true);
+            writeLoop(container, shouldStopLoop, excludedRegions, 1000, true, totalWriteAttempts, totalSuccessfulWriteAttempts);
 
             logger.info("Simulating fail-over...");
-            writeLoop(container, shouldStopLoop, Arrays.asList("East US"), 1000, true);
+            writeLoop(container, shouldStopLoop, Arrays.asList("East US"), 1000, true, totalWriteAttempts, totalSuccessfulWriteAttempts);
 
             logger.info("Moving back writes to first preferred region...");
-            writeLoop(container, shouldStopLoop, excludedRegions, 1000, true);
+            writeLoop(container, shouldStopLoop, excludedRegions, 1000, true, totalWriteAttempts, totalSuccessfulWriteAttempts);
         }
     }
 
-    private static void onWriteToOtherPreferredRegions(CosmosAsyncClient clientForOtherPreferredRegions, Configuration cfg, int taskId, AtomicBoolean shouldStopLoop) {
+    private static void onWriteToOtherPreferredRegions(
+            CosmosAsyncClient clientForOtherPreferredRegions,
+            Configuration cfg,
+            int taskId,
+            AtomicBoolean shouldStopLoop,
+            AtomicInteger totalWriteAttempts,
+            AtomicInteger totalSuccessfulWriteAttempts) {
+
         logger.info("WRITE to other preferred region started through task : {}...", taskId);
 
         List<String> excludedRegions = Arrays.asList("East US");
@@ -277,11 +387,16 @@ public class ReadMyWriteWithWritesToDifferentRegions extends Workload {
         CosmosAsyncContainer container = clientForOtherPreferredRegions.getDatabase(cfg.getDatabaseName()).getContainer(cfg.getContainerName());
 
         while (!shouldStopLoop.get()) {
-            writeLoop(container, shouldStopLoop, excludedRegions, 1000, false);
+            writeLoop(container, shouldStopLoop, excludedRegions, 1000, false, totalWriteAttempts, totalSuccessfulWriteAttempts);
         }
     }
 
-    private static void onTryReadFromFirstPreferredRegion(CosmosAsyncClient clientForFirstPreferredRegion, Configuration cfg, AtomicBoolean shouldStopLoop) {
+    private static void onTryReadFromFirstPreferredRegion(
+            CosmosAsyncClient clientForFirstPreferredRegion,
+            Configuration cfg,
+            AtomicBoolean shouldStopLoop,
+            AtomicInteger totalReadAttempts,
+            AtomicInteger totalSuccessfulReadAttempts) {
         logger.info("READ attempt from first preferred started...");
 
         List<String> excludedRegions = Arrays.asList("");
@@ -289,7 +404,7 @@ public class ReadMyWriteWithWritesToDifferentRegions extends Workload {
         CosmosAsyncContainer container = clientForFirstPreferredRegion.getDatabase(cfg.getDatabaseName()).getContainer(cfg.getContainerName());
 
         while (!shouldStopLoop.get()) {
-            readLoop(container, shouldStopLoop, excludedRegions, 1000);
+            readLoop(container, shouldStopLoop, excludedRegions, 1000, totalReadAttempts, totalSuccessfulReadAttempts);
         }
     }
 
@@ -298,13 +413,15 @@ public class ReadMyWriteWithWritesToDifferentRegions extends Workload {
             AtomicBoolean shouldLoopTerminate,
             List<String> excludedRegions,
             Integer maxIterations,
-            boolean shouldCache) {
+            boolean shouldCache,
+            AtomicInteger totalWriteAttempts,
+            AtomicInteger totalSuccessfulWriteAttempts) {
 
         int iterationCount = 0;
 
         while (!shouldLoopTerminate.get() && iterationCount < maxIterations) {
             iterationCount++;
-            write(container, excludedRegions, shouldCache);
+            write(container, excludedRegions, shouldCache, totalWriteAttempts, totalSuccessfulWriteAttempts);
         }
     }
 
@@ -312,27 +429,36 @@ public class ReadMyWriteWithWritesToDifferentRegions extends Workload {
             CosmosAsyncContainer container,
             AtomicBoolean shouldLoopTerminate,
             List<String> excludedRegions,
-            Integer maxIterations) {
+            Integer maxIterations,
+            AtomicInteger totalReadAttempts,
+            AtomicInteger totalSuccessfulReadAttempts) {
 
         int iterationCount = 0;
 
         while (!shouldLoopTerminate.get() && iterationCount < maxIterations) {
             iterationCount++;
-            read(container, excludedRegions);
+            read(container, excludedRegions, totalReadAttempts, totalSuccessfulReadAttempts);
         }
     }
 
-    private static void write(CosmosAsyncContainer container, List<String> excludedRegions, boolean shouldCache) {
+    private static void write(
+            CosmosAsyncContainer container,
+            List<String> excludedRegions,
+            boolean shouldCache,
+            AtomicInteger totalWriteAttempts,
+            AtomicInteger totalSuccessfulWriteAttempts) {
         String id = UUID.randomUUID().toString();
         CosmosItemRequestOptions options = new CosmosItemRequestOptions().setExcludedRegions(excludedRegions);
         try {
             logger.debug("--> write {}", id);
             container
                     .createItem(getDocumentDefinition(id), new PartitionKey(id), new CosmosItemRequestOptions().setExcludedRegions(excludedRegions))
+                    .doOnSubscribe(unused -> totalWriteAttempts.incrementAndGet())
                     .doOnSuccess(response -> {
                         if (shouldCache) {
                             globalCache.put(id, id);
                         }
+                        totalSuccessfulWriteAttempts.incrementAndGet();
                     })
                     .block();
             logger.debug("<-- write {}", id);
@@ -342,7 +468,12 @@ public class ReadMyWriteWithWritesToDifferentRegions extends Workload {
         }
     }
 
-    private static void read(CosmosAsyncContainer container, List<String> excludedRegions) {
+    private static void read(
+            CosmosAsyncContainer container,
+            List<String> excludedRegions,
+            AtomicInteger totalReadAttempts,
+            AtomicInteger totalSuccessfulReadCount) {
+
         List<String> ids = new ArrayList<>(globalCache.values());
 
         if (ids.size() == 0) {
@@ -356,7 +487,8 @@ public class ReadMyWriteWithWritesToDifferentRegions extends Workload {
             logger.info("Attempting read of id : {}", id);
             container
                     .readItem(id, new PartitionKey(id), options, ObjectNode.class)
-                    .doOnSuccess(unused -> logger.info("Successful read of id : {}", id))
+                    .doOnSubscribe(unused -> totalReadAttempts.incrementAndGet())
+                    .doOnSuccess(unused -> totalSuccessfulReadCount.incrementAndGet())
                     .block();
         } catch (CosmosException error) {
             logger.info("COSMOS EXCEPTION - CTX: {}", error.getDiagnostics().getDiagnosticsContext().toJson(), error);
@@ -404,7 +536,49 @@ public class ReadMyWriteWithWritesToDifferentRegions extends Workload {
         logger.info("Configuration : {}", cfg);
     }
 
-    private static void printStatistics(Map<String, String> globalCache) {
-        logger.info("Count of items written : {}", globalCache.size());
+    private static void printStatistics(
+            Map<String, String> globalCache,
+            AtomicInteger totalSuccessfulWriteCountFromPrimaryWriter,
+            AtomicInteger totalSuccessfulWriteCountFromSecondaryWriter,
+            AtomicInteger totalSuccessfulReadCountFromPrimaryReader,
+            AtomicInteger totalWriteCountFromPrimaryWriter,
+            AtomicInteger totalWriteCountFromSecondaryWriter,
+            AtomicInteger totalReadCountFromPrimaryReader,
+            AtomicInteger primaryWriterReadSessionNotAvailableCount,
+            AtomicInteger secondaryWriterReadSessionNotAvailableCount,
+            AtomicInteger primaryReaderReadSessionNotAvailableCount,
+            AtomicInteger primaryWriterThresholdExceededCount,
+            AtomicInteger secondaryWriterThresholdExceededCount,
+            AtomicInteger primaryReaderThresholdExceededCount,
+            AtomicInteger primaryWriterFailureCount,
+            AtomicInteger secondaryWriterFailureCount,
+            AtomicInteger primaryReaderFailureCount) {
+
+        logger.info("|--------------------------------------------------------|");
+        logger.info("Size of global cache (populated by primary writes) : {}", globalCache.size());
+        logger.info("|--------------------------------------------------------|");
+        logger.info("Total successful write counts from primary writer : {}", totalSuccessfulWriteCountFromPrimaryWriter.get());
+        logger.info("Total write counts from primary writer : {}", totalWriteCountFromPrimaryWriter.get());
+        logger.info("Total successful write counts from secondary writer : {}", totalSuccessfulWriteCountFromSecondaryWriter.get());
+        logger.info("Total write counts from secondary writer : {}", totalWriteCountFromSecondaryWriter.get());
+        logger.info("Total successful read counts from primary reader : {}", totalSuccessfulReadCountFromPrimaryReader.get());
+        logger.info("Total read counts from primary reader : {}", totalReadCountFromPrimaryReader.get());
+        logger.info("|--------------------------------------------------------|");
+        logger.info("Primary writes with 404/1002 : {}", primaryWriterReadSessionNotAvailableCount);
+        logger.info("Secondary writes with 404/1002 : {}", secondaryWriterReadSessionNotAvailableCount);
+        logger.info("Primary reads with 404/1002 : {}", primaryReaderReadSessionNotAvailableCount);
+        logger.info("|--------------------------------------------------------|");
+        logger.info("Primary writes with threshold exceed : {}", primaryWriterThresholdExceededCount);
+        logger.info("Secondary writes with threshold exceeded : {}", secondaryWriterThresholdExceededCount);
+        logger.info("Primary reads with threshold exceeded : {}", primaryReaderThresholdExceededCount);
+        logger.info("|--------------------------------------------------------|");
+        logger.info("Primary writes with failure : {}", primaryWriterFailureCount);
+        logger.info("Secondary writes with failure : {}", secondaryWriterFailureCount);
+        logger.info("Primary reads with failure : {}", primaryReaderFailureCount);
+        logger.info("|--------------------------------------------------------|");
+        logger.info("% of primary reads with 404/1002: {}%", ((double) primaryReaderReadSessionNotAvailableCount.get() / (double) totalReadCountFromPrimaryReader.get()) * 100d);
+        logger.info("% of primary writes with 404/1002: {}%", ((double) primaryWriterReadSessionNotAvailableCount.get() / (double) totalWriteCountFromPrimaryWriter.get()) * 100d);
+        logger.info("% of secondary writes with 404/1002: {}%", ((double) secondaryWriterReadSessionNotAvailableCount.get() / (double) totalWriteCountFromSecondaryWriter.get()) * 100d);
+        logger.info("|--------------------------------------------------------|");
     }
 }
