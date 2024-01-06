@@ -16,7 +16,6 @@ import com.azure.cosmos.models.CosmosClientTelemetryConfig;
 import com.azure.cosmos.models.CosmosItemRequestOptions;
 import com.azure.cosmos.models.PartitionKey;
 import com.azure.cosmos.models.ThroughputProperties;
-import com.beust.ah.A;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.json.JsonReadFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -231,7 +230,7 @@ public class ReadMyWriteWithWritesToDifferentRegions extends Workload {
         builder.endpoint(cfg.getServiceEndpoint());
         builder.key(cfg.getMasterKey());
         builder.multipleWriteRegionsEnabled(true);
-        builder.preferredRegions(Arrays.asList("East US", "South Central US", "West US"));
+        builder.preferredRegions(Arrays.asList("West US", "South Central US", "East US"));
 
         if (cfg.getConnectionMode() == ConnectionMode.GATEWAY) {
             builder.gatewayMode();
@@ -357,18 +356,16 @@ public class ReadMyWriteWithWritesToDifferentRegions extends Workload {
 
         logger.info("WRITE to first preferred region started...");
 
-        List<String> excludedRegions = Arrays.asList("");
-
         CosmosAsyncContainer container = clientForFirstPreferredRegion.getDatabase(cfg.getDatabaseName()).getContainer(cfg.getContainerName());
 
         while (!shouldStopLoop.get()) {
-            writeLoop(container, shouldStopLoop, excludedRegions, 1000, true, totalWriteAttempts, totalSuccessfulWriteAttempts);
+            writeLoop(container, shouldStopLoop, Arrays.asList("East US"), 100, true, totalWriteAttempts, totalSuccessfulWriteAttempts);
 
             logger.info("Simulating fail-over...");
-            writeLoop(container, shouldStopLoop, Arrays.asList("East US"), 1000, true, totalWriteAttempts, totalSuccessfulWriteAttempts);
+            writeLoop(container, shouldStopLoop, Arrays.asList("West US", "East US"), 100, true, totalWriteAttempts, totalSuccessfulWriteAttempts);
 
             logger.info("Moving back writes to first preferred region...");
-            writeLoop(container, shouldStopLoop, excludedRegions, 1000, true, totalWriteAttempts, totalSuccessfulWriteAttempts);
+            writeLoop(container, shouldStopLoop, Arrays.asList("East US"), 1000, true, totalWriteAttempts, totalSuccessfulWriteAttempts);
         }
     }
 
@@ -382,12 +379,10 @@ public class ReadMyWriteWithWritesToDifferentRegions extends Workload {
 
         logger.info("WRITE to other preferred region started through task : {}...", taskId);
 
-        List<String> excludedRegions = Arrays.asList("East US");
-
         CosmosAsyncContainer container = clientForOtherPreferredRegions.getDatabase(cfg.getDatabaseName()).getContainer(cfg.getContainerName());
 
         while (!shouldStopLoop.get()) {
-            writeLoop(container, shouldStopLoop, excludedRegions, 1000, false, totalWriteAttempts, totalSuccessfulWriteAttempts);
+            writeLoop(container, shouldStopLoop, Arrays.asList("West US", "East US"), 1000, false, totalWriteAttempts, totalSuccessfulWriteAttempts);
         }
     }
 
@@ -399,12 +394,10 @@ public class ReadMyWriteWithWritesToDifferentRegions extends Workload {
             AtomicInteger totalSuccessfulReadAttempts) {
         logger.info("READ attempt from first preferred started...");
 
-        List<String> excludedRegions = Arrays.asList("");
-
         CosmosAsyncContainer container = clientForFirstPreferredRegion.getDatabase(cfg.getDatabaseName()).getContainer(cfg.getContainerName());
 
         while (!shouldStopLoop.get()) {
-            readLoop(container, shouldStopLoop, excludedRegions, 1000, totalReadAttempts, totalSuccessfulReadAttempts);
+            readLoop(container, shouldStopLoop, Arrays.asList(""), 1000, totalReadAttempts, totalSuccessfulReadAttempts);
         }
     }
 
