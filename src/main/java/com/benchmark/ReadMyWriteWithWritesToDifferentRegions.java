@@ -59,6 +59,9 @@ public class ReadMyWriteWithWritesToDifferentRegions extends Workload {
     @Override
     public void execute(Configuration cfg) {
 
+        logger.info("Setting required system properties...");
+        setRequiredSystemProperties();
+
         String runId = UUID.randomUUID().toString();
         logger.info("Starting run with runId : {}", runId);
 
@@ -204,6 +207,8 @@ public class ReadMyWriteWithWritesToDifferentRegions extends Workload {
                 isFailurePrimaryWritesCount,
                 isFailureSecondaryWritesCount,
                 isFailurePrimaryReadsCount);
+
+        clearRequiredSystemProperties();
     }
 
     private static CosmosAsyncClient createClient(
@@ -573,5 +578,13 @@ public class ReadMyWriteWithWritesToDifferentRegions extends Workload {
         logger.info("% of primary writes with 404/1002: {}%", ((double) primaryWriterReadSessionNotAvailableCount.get() / (double) totalWriteCountFromPrimaryWriter.get()) * 100d);
         logger.info("% of secondary writes with 404/1002: {}%", ((double) secondaryWriterReadSessionNotAvailableCount.get() / (double) totalWriteCountFromSecondaryWriter.get()) * 100d);
         logger.info("|--------------------------------------------------------|");
+    }
+
+    private static void setRequiredSystemProperties() {
+        System.setProperty("applicationinsights.role.name", "readMyWriteWithWriteFailoverAndPkScoping");
+    }
+
+    private static void clearRequiredSystemProperties() {
+        System.clearProperty("applicationinsights.role.name");
     }
 }
