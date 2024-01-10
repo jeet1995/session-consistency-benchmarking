@@ -56,6 +56,9 @@ public class Configuration {
     @Parameter(names = "-runDuration", description = "The duration for which the workload should run.", converter = DurationConverter.class)
     private Duration runDuration;
 
+    @Parameter(names = "-readAfterWriteType", description = "The type of read which determines what written document to be read.", converter = ReadAfterWriteTypeConverter.class)
+    private ReadAfterWriteType readAfterWriteType;
+
     public String getServiceEndpoint() {
         return serviceEndpoint;
     }
@@ -102,6 +105,10 @@ public class Configuration {
 
     public int getMaxRetryCountInRegion() {
         return maxRetryCountInRegion;
+    }
+
+    public ReadAfterWriteType getReadAfterWriteType() {
+        return readAfterWriteType;
     }
 
     public void populateWithDefaults() {
@@ -165,6 +172,23 @@ public class Configuration {
         }
     }
 
+    static class ReadAfterWriteTypeConverter implements IStringConverter<ReadAfterWriteType> {
+
+        @Override
+        public ReadAfterWriteType convert(String value) {
+
+            String normalizedReadAfterWriteTypeAsString = value.toLowerCase(Locale.ROOT).replace(" ", "").trim();
+
+            if (normalizedReadAfterWriteTypeAsString.equals("readrandomwrite")) {
+                return ReadAfterWriteType.READ_RANDOM_WRITE;
+            } else if (normalizedReadAfterWriteTypeAsString.equals("readnewerwrite")) {
+                return ReadAfterWriteType.READ_NEWER_WRITE;
+            } else {
+                return ReadAfterWriteType.READ_RANDOM_WRITE;
+            }
+        }
+    }
+
     @Override
     public String toString() {
         return "Configuration{" +
@@ -179,6 +203,7 @@ public class Configuration {
                 ", maxRetryCountInRegion=" + maxRetryCountInRegion +
                 ", regionSwitchHint=" + (regionSwitchHint == CosmosRegionSwitchHint.LOCAL_REGION_PREFERRED ? "local_region_preferred" : "remote_region_preferred") +
                 ", runDuration=" + runDuration +
+                ", readAfterWriteType=" + ((readAfterWriteType == ReadAfterWriteType.READ_NEWER_WRITE) ? "READ_NEWER_WRITE" : "READ_RANDOM_WRITE") +
                 '}';
     }
 }

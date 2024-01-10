@@ -21,11 +21,18 @@ public class Main {
         logger.info("Parsing command-line args...");
 
         JCommander jCommander = new JCommander(cfg, null, args);
-        ReadMyWriteWithWritesToDifferentRegions readMyWriteWithWritesToDifferentRegions
-                = new ReadMyWriteWithWritesToDifferentRegions();
+        RandomItemReadMyWriteWithWritesToDifferentRegions randomItemReadMyWriteWithWritesToDifferentRegions
+                = new RandomItemReadMyWriteWithWritesToDifferentRegions();
+        NewerItemReadMyWriteWithWritesToDifferentRegions newerItemReadMyWriteWithWritesToDifferentRegions
+                = new NewerItemReadMyWriteWithWritesToDifferentRegions();
 
-        ScheduledFuture<?> task
-                = workloadExecutor.schedule(() -> readMyWriteWithWritesToDifferentRegions.execute(cfg), 1000, TimeUnit.MILLISECONDS);
+        ScheduledFuture<?> task;
+
+        if (cfg.getReadAfterWriteType() == ReadAfterWriteType.READ_NEWER_WRITE) {
+            task = workloadExecutor.schedule(() -> newerItemReadMyWriteWithWritesToDifferentRegions.execute(cfg), 1000, TimeUnit.MILLISECONDS);
+        } else {
+            task = workloadExecutor.schedule(() -> randomItemReadMyWriteWithWritesToDifferentRegions.execute(cfg), 1000, TimeUnit.MILLISECONDS);
+        }
 
         while (true) {
             if (task.isDone()) {
