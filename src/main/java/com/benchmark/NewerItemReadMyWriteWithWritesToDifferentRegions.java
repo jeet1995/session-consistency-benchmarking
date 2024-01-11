@@ -11,7 +11,6 @@ import com.azure.cosmos.CosmosException;
 import com.azure.cosmos.CosmosRegionSwitchHint;
 import com.azure.cosmos.SessionRetryOptionsBuilder;
 import com.azure.cosmos.implementation.CosmosDaemonThreadFactory;
-import com.azure.cosmos.implementation.apachecommons.lang.RandomUtils;
 import com.azure.cosmos.models.CosmosClientTelemetryConfig;
 import com.azure.cosmos.models.CosmosItemRequestOptions;
 import com.azure.cosmos.models.PartitionKey;
@@ -24,12 +23,10 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.time.Duration;
-import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.LinkedList;
 import java.util.List;
-import java.util.Map;
 import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
@@ -38,9 +35,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.fail;
 
-public class ReadMyWriteWithWritesToDifferentRegions extends Workload {
-
-    private static final Logger logger = LoggerFactory.getLogger(ReadMyWriteWithWritesToDifferentRegions.class);
+public class NewerItemReadMyWriteWithWritesToDifferentRegions extends Workload {
+    private static final Logger logger = LoggerFactory.getLogger(NewerItemReadMyWriteWithWritesToDifferentRegions.class);
     private static ScheduledThreadPoolExecutor executorForWritesAgainstFirstPreferredRegion;
     private static ScheduledThreadPoolExecutor executorForReadsAgainstFirstPreferredRegion;
     private static ScheduledThreadPoolExecutor executorForWritesAgainstOtherPreferredRegions;
@@ -55,7 +51,7 @@ public class ReadMyWriteWithWritesToDifferentRegions extends Workload {
             true
     );
     private static final AtomicBoolean shouldCleanUp = new AtomicBoolean(true);
-    private static final ConcurrentHashMap<String, String> globalCache = new ConcurrentHashMap<>();
+    private static final LinkedList<String> globalCache = new LinkedList<>();
     @Override
     public void execute(Configuration cfg) {
 
@@ -362,7 +358,7 @@ public class ReadMyWriteWithWritesToDifferentRegions extends Workload {
             writeLoop(container, shouldStopLoop, Arrays.asList("East US"), 100, true, totalWriteAttempts, totalSuccessfulWriteAttempts);
 
             logger.info("Simulating fail-over...");
-            writeLoop(container, shouldStopLoop, Arrays.asList("West US", "East US"), 100, true, totalWriteAttempts, totalSuccessfulWriteAttempts);
+            writeLoop(container, shouldStopLoop, Arrays.asList("West US", "East US"), 1000, true, totalWriteAttempts, totalSuccessfulWriteAttempts);
 
             logger.info("Moving back writes to first preferred region...");
             writeLoop(container, shouldStopLoop, Arrays.asList("East US"), 1000, true, totalWriteAttempts, totalSuccessfulWriteAttempts);
@@ -397,7 +393,7 @@ public class ReadMyWriteWithWritesToDifferentRegions extends Workload {
         CosmosAsyncContainer container = clientForFirstPreferredRegion.getDatabase(cfg.getDatabaseName()).getContainer(cfg.getContainerName());
 
         while (!shouldStopLoop.get()) {
-            readLoop(container, shouldStopLoop, Arrays.asList(""), 1000, totalReadAttempts, totalSuccessfulReadAttempts);
+            readLoop(container, shouldStopLoop, Arrays.asList("East US"), 1000, totalReadAttempts, totalSuccessfulReadAttempts);
         }
     }
 
@@ -449,7 +445,7 @@ public class ReadMyWriteWithWritesToDifferentRegions extends Workload {
                     .doOnSubscribe(unused -> totalWriteAttempts.incrementAndGet())
                     .doOnSuccess(response -> {
                         if (shouldCache) {
-                            globalCache.put(id, id);
+                            globalCache.offer(id);
                         }
                         totalSuccessfulWriteAttempts.incrementAndGet();
                     })
@@ -467,15 +463,15 @@ public class ReadMyWriteWithWritesToDifferentRegions extends Workload {
             AtomicInteger totalReadAttempts,
             AtomicInteger totalSuccessfulReadCount) {
 
-        List<String> ids = new ArrayList<>(globalCache.values());
-
-        if (ids.size() == 0) {
+        if (globalCache.isEmpty()) {
             logger.info("Empty global cache!");
             return;
         }
 
-        String id = ids.get(RandomUtils.nextInt(0, ids.size()));
+        String id = globalCache.getLast();
+
         CosmosItemRequestOptions options = new CosmosItemRequestOptions().setExcludedRegions(excludedRegions);
+
         try {
             logger.info("Attempting read of id : {}", id);
             container
@@ -530,7 +526,7 @@ public class ReadMyWriteWithWritesToDifferentRegions extends Workload {
     }
 
     private static void printStatistics(
-            Map<String, String> globalCache,
+            List<String> globalCache,
             AtomicInteger totalSuccessfulWriteCountFromPrimaryWriter,
             AtomicInteger totalSuccessfulWriteCountFromSecondaryWriter,
             AtomicInteger totalSuccessfulReadCountFromPrimaryReader,
