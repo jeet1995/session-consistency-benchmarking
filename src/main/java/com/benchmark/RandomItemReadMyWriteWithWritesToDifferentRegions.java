@@ -362,7 +362,7 @@ public class RandomItemReadMyWriteWithWritesToDifferentRegions extends Workload 
             writeLoop(container, shouldStopLoop, Arrays.asList("East US"), 100, true, totalWriteAttempts, totalSuccessfulWriteAttempts);
 
             logger.info("Simulating fail-over...");
-            writeLoop(container, shouldStopLoop, Arrays.asList("West US", "East US"), 100, true, totalWriteAttempts, totalSuccessfulWriteAttempts);
+            writeLoop(container, shouldStopLoop, Arrays.asList("West US", "East US"), 1000, true, totalWriteAttempts, totalSuccessfulWriteAttempts);
 
             logger.info("Moving back writes to first preferred region...");
             writeLoop(container, shouldStopLoop, Arrays.asList("East US"), 1000, true, totalWriteAttempts, totalSuccessfulWriteAttempts);
@@ -392,12 +392,14 @@ public class RandomItemReadMyWriteWithWritesToDifferentRegions extends Workload 
             AtomicBoolean shouldStopLoop,
             AtomicInteger totalReadAttempts,
             AtomicInteger totalSuccessfulReadAttempts) {
-        logger.info("READ attempt from first preferred started...");
+        logger.info("READ attempt from first preferred region started...");
 
         CosmosAsyncContainer container = clientForFirstPreferredRegion.getDatabase(cfg.getDatabaseName()).getContainer(cfg.getContainerName());
 
         while (!shouldStopLoop.get()) {
-            readLoop(container, shouldStopLoop, Arrays.asList(""), 1000, totalReadAttempts, totalSuccessfulReadAttempts);
+            readLoop(container, shouldStopLoop, Arrays.asList("East US"), 100, totalReadAttempts, totalSuccessfulReadAttempts);
+            readLoop(container, shouldStopLoop, Arrays.asList("West US, East US"), 1000, totalReadAttempts, totalSuccessfulReadAttempts);
+            readLoop(container, shouldStopLoop, Arrays.asList("East US"), 1000, totalReadAttempts, totalSuccessfulReadAttempts);
         }
     }
 

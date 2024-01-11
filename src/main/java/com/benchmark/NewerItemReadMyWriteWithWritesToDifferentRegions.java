@@ -36,7 +36,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import static org.assertj.core.api.Assertions.fail;
 
 public class NewerItemReadMyWriteWithWritesToDifferentRegions extends Workload {
-    private static final Logger logger = LoggerFactory.getLogger(RandomItemReadMyWriteWithWritesToDifferentRegions.class);
+    private static final Logger logger = LoggerFactory.getLogger(NewerItemReadMyWriteWithWritesToDifferentRegions.class);
     private static ScheduledThreadPoolExecutor executorForWritesAgainstFirstPreferredRegion;
     private static ScheduledThreadPoolExecutor executorForReadsAgainstFirstPreferredRegion;
     private static ScheduledThreadPoolExecutor executorForWritesAgainstOtherPreferredRegions;
@@ -358,7 +358,7 @@ public class NewerItemReadMyWriteWithWritesToDifferentRegions extends Workload {
             writeLoop(container, shouldStopLoop, Arrays.asList("East US"), 100, true, totalWriteAttempts, totalSuccessfulWriteAttempts);
 
             logger.info("Simulating fail-over...");
-            writeLoop(container, shouldStopLoop, Arrays.asList("West US", "East US"), 100, true, totalWriteAttempts, totalSuccessfulWriteAttempts);
+            writeLoop(container, shouldStopLoop, Arrays.asList("West US", "East US"), 1000, true, totalWriteAttempts, totalSuccessfulWriteAttempts);
 
             logger.info("Moving back writes to first preferred region...");
             writeLoop(container, shouldStopLoop, Arrays.asList("East US"), 1000, true, totalWriteAttempts, totalSuccessfulWriteAttempts);
@@ -393,7 +393,9 @@ public class NewerItemReadMyWriteWithWritesToDifferentRegions extends Workload {
         CosmosAsyncContainer container = clientForFirstPreferredRegion.getDatabase(cfg.getDatabaseName()).getContainer(cfg.getContainerName());
 
         while (!shouldStopLoop.get()) {
-            readLoop(container, shouldStopLoop, Arrays.asList(""), 1000, totalReadAttempts, totalSuccessfulReadAttempts);
+            readLoop(container, shouldStopLoop, Arrays.asList("East US"), 100, totalReadAttempts, totalSuccessfulReadAttempts);
+            readLoop(container, shouldStopLoop, Arrays.asList("West US, East US"), 1000, totalReadAttempts, totalSuccessfulReadAttempts);
+            readLoop(container, shouldStopLoop, Arrays.asList("East US"), 1000, totalReadAttempts, totalSuccessfulReadAttempts);
         }
     }
 
