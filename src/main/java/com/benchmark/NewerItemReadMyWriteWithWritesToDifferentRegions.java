@@ -393,6 +393,8 @@ public class NewerItemReadMyWriteWithWritesToDifferentRegions extends Workload {
         CosmosAsyncContainer container = clientForFirstPreferredRegion.getDatabase(cfg.getDatabaseName()).getContainer(cfg.getContainerName());
 
         while (!shouldStopLoop.get()) {
+            readLoop(container, shouldStopLoop, Arrays.asList("East US"), 100, totalReadAttempts, totalSuccessfulReadAttempts);
+            readLoop(container, shouldStopLoop, Arrays.asList("West US, East US"), 1000, totalReadAttempts, totalSuccessfulReadAttempts);
             readLoop(container, shouldStopLoop, Arrays.asList("East US"), 1000, totalReadAttempts, totalSuccessfulReadAttempts);
         }
     }
